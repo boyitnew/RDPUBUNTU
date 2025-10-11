@@ -1,0 +1,79 @@
+name: Ephemeral-Admin-Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-admin-and-keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # job max 6 hours on Free plan; adjust if you have a different plan
+    steps:
+      - name: Start - show notice
+        run: |
+          echo "This workflow creates a local sudo-capable user and optionally enables root."
+          echo "It DOES NOT open network ports or enable remote RDP access."
+      
+      - name: Update apt cache
+        run: |
+          sudo apt-get update -y
+
+      - name: Install required utilities (no network services opened)
+        run: |
+          # install common tools; netcat-openbsd as replacement for 'netcat'
+          sudo apt-get install -y curl jq git netcat-openbsd pwgen
+
+      - name: Create admin user (RDP) with strong random password
+        id: create_user
+        run: |
+          set -euo pipefail
+          USERNAME="RDP"
+          # Generate a 24-char strong password
+          PASSWORD="$(pwgen -s 24 1)"
+          # Create user if not exists
+          if id "$USERNAME" >/dev/null 2>&1; then
+            echo "User $USERNAME already exists - will reset password and grant sudo."
+          else
+            sudo useradd -m -s /bin/bash "$USERNAME"
+          fi
+          # Set password (non-interactive)
+          echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
+          # Add to sudo group (admin privileges)
+          sudo usermod -aG sudo "$USERNAME"
+          # Disable passwordless sudo (ensure /etc/sudoers.d is sane) - keep default policy
+          # Mask the password in logs
+          echo "::add-mask::$PASSWORD"
+          # Export for later steps (available to later steps in this job)
+          echo "RDP_USER=${USERNAME}" >> $GITHUB_ENV
+          echo "RDP_PASS=${PASSWORD}" >> $GITHUB_ENV
+
+      - name: (Optional) Enable root account and set password if ALLOW_ROOT secret is set
+        if: ${{ secrets.ENABLE_ROOT == 'true' }}
+        run: |
+          set -euo pipefail
+          # Require user to provide root password via secret ROOT_PASSWORD
+          if [ -z "${{ secrets.ROOT_PASSWORD }}" ]; then
+            echo "ROOT_PASSWORD secret is empty. Exiting."
+            exit 1
+          fi
+          echo "root:${{ secrets.ROOT_PASSWORD }}" | sudo chpasswd
+          # Ensure root can use passwd / login; do NOT enable remote root login here.
+          sudo passwd -u root || true
+          echo "::add-mask::${{ secrets.ROOT_PASSWORD }}"
+          echo "ROOT_ENABLED=true" >> $GITHUB_ENV
+
+      - name: Verify sudo for created user (non-interactive check)
+        run: |
+          set -euo pipefail
+          # quick check: run a harmless command as the new user with sudo
+          sudo -u ${RDP_USER} -H bash -c "sudo -n true" || echo "Note: interactive sudo may still require password over ssh/rdp"
+
+      - name: Keep the job alive (keep runner active)
+        run: |
+          echo "Runner will stay alive for 18000 seconds (5 hours) or until GitHub kills the job."
+          echo "Note: GitHub-hosted runners are ephemeral; the VM will be deleted after job ends."
+          # Print limited heartbeat messages to logs every 5 minutes (avoid flooding)
+          END=$(( $(date +%s) + 18000 ))
+          while [ $(date +%s) -lt $END ]; do
+            echo "[$(date --iso-8601=seconds)] Runner alive; time left: $(( END - $(date +%s) ))s"
+            sleep 18000
+          done
