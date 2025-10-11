@@ -6,12 +6,13 @@ on:
 jobs:
   create-admin-and-keepalive:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # max 6 hours for GitHub Free plan
+    timeout-minutes: 360  # max 6 hours for GitHub Free
+
     steps:
-      - name: Start - show notice
+      - name: Start - notice
         run: |
-          echo "This workflow creates a local sudo-capable user and optionally enables root."
-          echo "It DOES NOT open network ports or enable remote RDP access."
+          echo "Creating a sudo-capable user and optionally enabling root."
+          echo "RDP/Tailscale not enabled for security reasons."
 
       - name: Update apt cache
         run: sudo apt-get update -y
@@ -26,7 +27,7 @@ jobs:
           USERNAME="RDP"
           PASSWORD="$(pwgen -s 24 1)"
           if id "$USERNAME" >/dev/null 2>&1; then
-            echo "User $USERNAME already exists - resetting password and granting sudo."
+            echo "User $USERNAME exists - resetting password."
           else
             sudo useradd -m -s /bin/bash "$USERNAME"
           fi
@@ -59,14 +60,15 @@ jobs:
         run: |
           sudo -u ${RDP_USER} -H bash -c "sudo -n true" || echo "Interactive sudo may require password"
 
-      - name: Save credentials and runner IP as artifact
+      - name: Prepare credentials file
         run: |
           mkdir -p /tmp/rdp_creds
           echo "USER=${RDP_USER}" > /tmp/rdp_creds/creds.txt
           echo "PASS=${RDP_PASS}" >> /tmp/rdp_creds/creds.txt
-          # internal and external IPs
           echo "RUNNER_INTERNAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')" >> /tmp/rdp_creds/creds.txt
           echo "RUNNER_EXTERNAL_IP=$(curl -fsS ifconfig.me || echo 'no-external-ip')" >> /tmp/rdp_creds/creds.txt
+
+      - name: Upload credentials artifact
         uses: actions/upload-artifact@v4
         with:
           name: rdp-creds
