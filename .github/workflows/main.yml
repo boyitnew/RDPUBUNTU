@@ -6,7 +6,7 @@ on:
 jobs:
   create-admin-and-keepalive:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # max 6 hours for GitHub Free
+    timeout-minutes: 360  # max 6 hours for GitHub Free plan
     steps:
       - name: Start - show notice
         run: |
@@ -58,6 +58,19 @@ jobs:
       - name: Verify sudo for created user
         run: |
           sudo -u ${RDP_USER} -H bash -c "sudo -n true" || echo "Interactive sudo may require password"
+
+      - name: Save credentials and runner IP as artifact
+        run: |
+          mkdir -p /tmp/rdp_creds
+          echo "USER=${RDP_USER}" > /tmp/rdp_creds/creds.txt
+          echo "PASS=${RDP_PASS}" >> /tmp/rdp_creds/creds.txt
+          # internal and external IPs
+          echo "RUNNER_INTERNAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')" >> /tmp/rdp_creds/creds.txt
+          echo "RUNNER_EXTERNAL_IP=$(curl -fsS ifconfig.me || echo 'no-external-ip')" >> /tmp/rdp_creds/creds.txt
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdp-creds
+          path: /tmp/rdp_creds/creds.txt
 
       - name: Keep the job alive (5 hours)
         run: |
