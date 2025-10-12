@@ -14,13 +14,6 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xrdp xfce4 xfce4-goodies dbus-x11
           
-          # Configure XRDP to use Xfce
-          echo "xfce4-session" | sudo tee /home/rdpuser/.xsession
-          
-          # Start XRDP service
-          sudo systemctl enable xrdp
-          sudo systemctl start xrdp
-          
           # Allow RDP through firewall
           sudo ufw allow 3389/tcp
           sudo ufw --force enable
@@ -45,6 +38,10 @@ jobs:
           fi
           
           echo "RDP_CREDS=User: rdpuser | Password: *m96319631Z-" >> $GITHUB_ENV
+          
+          # Start XRDP service after user creation
+          sudo systemctl enable xrdp
+          sudo systemctl start xrdp
 
       - name: Install Tailscale
         run: |
