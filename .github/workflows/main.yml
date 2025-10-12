@@ -12,72 +12,54 @@ jobs:
       - name: نصب XRDP و محیط دسکتاپ
         run: |
           sudo apt-get update
-          # نصب lightdm همراه با lxde و xrdp برای مدیریت بهتر سشن نمایش
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             xrdp \
             lxde-core \
             lxde \
             dbus-x11 \
             x11-xserver-utils \
-            lightdm 
+            lightdm
           
-          # اجازه دسترسی RDP از طریق فایروال (UFw)
           sudo ufw allow 3389/tcp
           sudo ufw --force enable
 
       - name: ایجاد کاربر RDP و پیکربندی LXDE
         run: |
-          # ایجاد کاربر با رمز عبور ثابت
           sudo useradd -m -s /bin/bash rdpuser
           echo "rdpuser:*m96319631Z-" | sudo chpasswd
-          
-          # افزودن کاربر به گروه sudo برای دسترسی ادمین
           sudo usermod -aG sudo rdpuser
-          
-          # 1. پیکربندی LXDE برای XRDP با ایجاد .xsession
+
           echo "startlxde" | sudo tee /home/rdpuser/.xsession
           sudo chmod +x /home/rdpuser/.xsession
           sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
-          
-          # 2. پیکربندی startwm.sh برای استفاده صریح از .xsession کاربر
-          sudo tee /etc/xrdp/startwm.sh > /dev/null << 'XRDP_CONFIG'
+
+          sudo bash -c 'cat > /etc/xrdp/startwm.sh <<EOF
 #!/bin/sh
 if [ -r /etc/default/locale ]; then
   . /etc/default/locale
   export LANG LANGUAGE
 fi
 
-# استفاده از فایل .xsession کاربر
 if [ -r /etc/profile ]; then . /etc/profile; fi
 
-# دستوراتی که به اجرای صحیح سشن کمک می کند:
-test -x /etc/xrdp/xrdp-sesman -- -c /etc/xrdp/xrdp.ini && exec /etc/xrdp/xrdp-sesman || :
-
-# اگر دستورات بالا ناموفق بود، از .xsession یا Xsession عمومی استفاده کن
-if [ -r "$HOME/.xsession" ]; then
-  . "$HOME/.xsession"
+if [ -r "\$HOME/.xsession" ]; then
+  . "\$HOME/.xsession"
 elif [ -r /etc/X11/Xsession ]; then
   . /etc/X11/Xsession
 fi
-XRDP_CONFIG
+EOF'
+
           sudo chmod +x /etc/xrdp/startwm.sh
-          
-          # تنظیم Xwrapper.config برای اجازه اجرای X Server توسط هر کاربر
           sudo sed -i 's/^allowed_users=console/allowed_users=any/' /etc/X11/Xwrapper.config
-          
-          # Verify user creation
+
           if ! id rdpuser &>/dev/null; then
-              echo "ایجاد کاربر ناموفق بود"
-              exit 1
+            echo "ایجاد کاربر ناموفق بود"
+            exit 1
           fi
-          
+
           echo "RDP_CREDS=User: rdpuser | Password: *m96319631Z-" >> $GITHUB_ENV
-          
-          # راه‌اندازی مجدد سرویس XRDP پس از پیکربندی
           sudo systemctl enable xrdp
           sudo systemctl restart xrdp
-          
-          # صبر کوتاه برای شروع کامل سرویس
           sleep 5
 
       - name: نصب Tailscale
@@ -86,38 +68,32 @@ XRDP_CONFIG
 
       - name: برقراری اتصال Tailscale
         run: |
-          # شروع Tailscale با کلید احراز هویت
           sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-ubuntu-${{ github.run_id }}
-          
-          # انتظار برای تخصیص IP
+
           retries=0
           while [ -z "$TSIP" ] && [ $retries -lt 10 ]; do
               TSIP=$(tailscale ip -4)
               sleep 5
               retries=$((retries + 1))
           done
-          
+
           if [ -z "$TSIP" ]; then
               echo "آدرس IP تِیل‌اِسکِیل تخصیص داده نشد. خروج."
               exit 1
           fi
-          
+
           echo "TAILSCALE_IP=$TSIP" >> $GITHUB_ENV
           echo "آدرس IP تِیل‌اِسکِیل: $TSIP"
 
       - name: تأیید دسترسی RDP
         run: |
           echo "آدرس IP تِیل‌اِسکِیل: $TAILSCALE_IP"
-          
-          # بررسی اینکه آیا XRDP روی پورت 3389 گوش می‌دهد
           if ! sudo netstat -tuln | grep :3389; then
               echo "XRDP روی پورت 3389 در حال گوش دادن نیست"
               exit 1
           fi
-          
-          # بررسی وضعیت سرویس XRDP
+
           sudo systemctl status xrdp
-          
           echo "سرویس XRDP در حال اجرا و گوش دادن روی پورت 3389 است"
 
       - name: حفظ اتصال
@@ -132,7 +108,6 @@ XRDP_CONFIG
           echo "محیط دسکتاپ: LXDE (سبک)"
           echo ""
           
-          # فعال نگه داشتن Runner
           while true; do
               echo "[$(date)] RDP فعال - برای خاتمه دادن از دکمه لغو Workflow استفاده کنید"
               sleep 300
