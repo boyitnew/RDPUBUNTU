@@ -27,9 +27,20 @@ jobs:
           # Add user to sudo group for admin access
           sudo usermod -aG sudo rdpuser
           
-          # Create .xsession file for the user
-          echo "xfce4-session" | sudo tee /home/rdpuser/.xsession
+          # Configure Xfce for XRDP - use startxfce4 instead of xfce4-session
+          echo "startxfce4" | sudo tee /home/rdpuser/.xsession
+          sudo chmod +x /home/rdpuser/.xsession
           sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
+          
+          # Also create .xinitrc for backup
+          echo "#!/bin/sh" | sudo tee /home/rdpuser/.xinitrc
+          echo "exec startxfce4" | sudo tee -a /home/rdpuser/.xinitrc
+          sudo chmod +x /home/rdpuser/.xinitrc
+          sudo chown rdpuser:rdpuser /home/rdpuser/.xinitrc
+          
+          # Configure XRDP to use the startwm script properly
+          sudo sed -i 's|^test -x /etc/X11/Xsession && exec /etc/X11/Xsession|startxfce4|g' /etc/xrdp/startwm.sh
+          sudo sed -i 's|^exec /bin/sh /etc/X11/Xsession|startxfce4|g' /etc/xrdp/startwm.sh
           
           # Verify user creation
           if ! id rdpuser &>/dev/null; then
@@ -39,9 +50,9 @@ jobs:
           
           echo "RDP_CREDS=User: rdpuser | Password: *m96319631Z-" >> $GITHUB_ENV
           
-          # Start XRDP service after user creation
+          # Restart XRDP service after configuration
           sudo systemctl enable xrdp
-          sudo systemctl start xrdp
+          sudo systemctl restart xrdp
 
       - name: Install Tailscale
         run: |
