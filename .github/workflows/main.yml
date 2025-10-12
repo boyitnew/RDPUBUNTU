@@ -1,60 +1,100 @@
-name: RDP-Ubuntu
+name: Ubuntu RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp-ubuntu:
+  ubuntu-rdp:
     runs-on: ubuntu-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Update system
+      - name: Install XRDP and Desktop Environment
         run: |
-          sudo apt-get update -y
-
-      - name: Install desktop and RDP server
-        run: |
-          sudo apt-get install -y xfce4 xfce4-goodies xorg dbus-x11 x11-xserver-utils
-          sudo apt-get install -y xrdp
-          echo xfce4-session > ~/.xsession
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xrdp xfce4 xfce4-goodies dbus-x11
+          
+          # Configure XRDP to use Xfce
+          echo "xfce4-session" | sudo tee /home/rdpuser/.xsession
+          
+          # Start XRDP service
           sudo systemctl enable xrdp
-          sudo systemctl restart xrdp
+          sudo systemctl start xrdp
+          
+          # Allow RDP through firewall
+          sudo ufw allow 3389/tcp
+          sudo ufw --force enable
 
-      - name: Create RDP user
+      - name: Create RDP User with Fixed Password
         run: |
-          PASS=$(openssl rand -base64 12)
+          # Create user with fixed password
           sudo useradd -m -s /bin/bash rdpuser
-          echo "rdpuser:$PASS" | sudo chpasswd
-          echo "RDP_USER=rdpuser" >> $GITHUB_ENV
-          echo "RDP_PASS=$PASS" >> $GITHUB_ENV
-          echo "✅ Created user 'rdpuser' with password: $PASS"
+          echo "rdpuser:*m96319631Z-" | sudo chpasswd
+          
+          # Add user to sudo group for admin access
+          sudo usermod -aG sudo rdpuser
+          
+          # Create .xsession file for the user
+          echo "xfce4-session" | sudo tee /home/rdpuser/.xsession
+          sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
+          
+          # Verify user creation
+          if ! id rdpuser &>/dev/null; then
+              echo "User creation failed"
+              exit 1
+          fi
+          
+          echo "RDP_CREDS=User: rdpuser | Password: *m96319631Z-" >> $GITHUB_ENV
 
-      - name: Install and start Tailscale
-        env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+      - name: Install Tailscale
         run: |
-          curl -fsSL https://tailscale.com/install.sh | sudo sh
-          sudo tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
-          sleep 3
-          sudo tailscale up --authkey=${TAILSCALE_AUTH_KEY} --hostname="gh-rdp-${GITHUB_RUN_ID}"
-          echo "TAILSCALE_IP=$(sudo tailscale ip -4)" >> $GITHUB_ENV
+          curl -fsSL https://tailscale.com/install.sh | sh
 
-      - name: Show connection info
+      - name: Establish Tailscale Connection
+        run: |
+          # Start Tailscale with auth key
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-ubuntu-${{ github.run_id }}
+          
+          # Wait for IP assignment
+          retries=0
+          while [ -z "$TSIP" ] && [ $retries -lt 10 ]; do
+              TSIP=$(tailscale ip -4)
+              sleep 5
+              retries=$((retries + 1))
+          done
+          
+          if [ -z "$TSIP" ]; then
+              echo "Tailscale IP not assigned. Exiting."
+              exit 1
+          fi
+          
+          echo "TAILSCALE_IP=$TSIP" >> $GITHUB_ENV
+          echo "Tailscale IP: $TSIP"
+
+      - name: Verify RDP Accessibility
+        run: |
+          echo "Tailscale IP: $TAILSCALE_IP"
+          
+          # Check if XRDP is listening on port 3389
+          if ! sudo netstat -tuln | grep :3389; then
+              echo "XRDP is not listening on port 3389"
+              exit 1
+          fi
+          
+          echo "XRDP service is running and listening on port 3389"
+
+      - name: Maintain Connection
         run: |
           echo ""
-          echo "=========================="
-          echo "✅ RDP Access Information"
-          echo "IP Address : $TAILSCALE_IP"
-          echo "Username   : $RDP_USER"
-          echo "Password   : $RDP_PASS"
-          echo "=========================="
+          echo "=== RDP ACCESS ==="
+          echo "Address: $TAILSCALE_IP"
+          echo "Username: rdpuser"
+          echo "Password: *m96319631Z-"
+          echo "=================="
           echo ""
-          echo "Leave this workflow running to keep the RDP session alive."
-
-      - name: Keep alive
-        run: |
+          
+          # Keep runner active
           while true; do
-            echo "[ $(date) ] RDP session active..."
-            sleep 300
+              echo "[$(date)] RDP Active - Use workflow cancel button to terminate"
+              sleep 300
           done
