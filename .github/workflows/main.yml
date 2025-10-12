@@ -38,14 +38,14 @@ jobs:
           sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
           
           # Configure XRDP startwm.sh to use LXDE
-          sudo bash -c 'cat > /etc/xrdp/startwm.sh' << 'EOF'
-#!/bin/sh
-if [ -r /etc/default/locale ]; then
-  . /etc/default/locale
-  export LANG LANGUAGE
-fi
-lxsession -s LXDE -e LXDE
-EOF
+          sudo tee /etc/xrdp/startwm.sh > /dev/null << 'XRDP_CONFIG'
+          #!/bin/sh
+          if [ -r /etc/default/locale ]; then
+            . /etc/default/locale
+            export LANG LANGUAGE
+          fi
+          lxsession -s LXDE -e LXDE
+          XRDP_CONFIG
           sudo chmod +x /etc/xrdp/startwm.sh
           
           # Verify user creation
