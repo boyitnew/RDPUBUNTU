@@ -19,7 +19,7 @@ jobs:
             lxde \
             dbus-x11 \
             x11-xserver-utils \
-            lightdm  # اضافه کردن LightDM برای بهبود مدیریت نمایشگر
+            lightdm # اضافه شدن LightDM
           
           # اجازه دسترسی RDP از طریق فایروال (UFw)
           sudo ufw allow 3389/tcp
@@ -35,13 +35,13 @@ jobs:
           sudo usermod -aG sudo rdpuser
           
           # 1. پیکربندی LXDE برای XRDP با ایجاد .xsession
-          # استفاده از "startlxde" به جای "lxsession -s LXDE -e LXDE" روش مطمئن‌تری است.
+          # استفاده از "startlxde" به جای "lxsession -s LXDE -e LXDE" (کلید حل مشکل صفحه مشکی)
           echo "startlxde" | sudo tee /home/rdpuser/.xsession
           sudo chmod +x /home/rdpuser/.xsession
           sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
           
           # 2. پیکربندی startwm.sh برای استفاده صریح از .xsession کاربر
-          # این اسکریپت جدید تضمین می‌کند که تنظیمات سشن کاربر فراخوانی شود و مشکل صفحه مشکی رفع گردد.
+          # این اسکریپت تضمین می کند که تنظیمات سشن کاربر فراخوانی شود.
           sudo tee /etc/xrdp/startwm.sh > /dev/null << 'XRDP_CONFIG'
 #!/bin/sh
 if [ -r /etc/default/locale ]; then
@@ -67,7 +67,7 @@ XRDP_CONFIG
           # تنظیم Xwrapper.config برای اجازه اجرای X Server توسط هر کاربر (رفع مشکل نمایش)
           sudo sed -i 's/^allowed_users=console/allowed_users=any/' /etc/X11/Xwrapper.config
           
-          # تأیید ایجاد کاربر
+          # Verify user creation
           if ! id rdpuser &>/dev/null; then
               echo "ایجاد کاربر ناموفق بود"
               exit 1
