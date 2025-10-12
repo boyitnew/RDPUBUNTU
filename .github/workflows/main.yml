@@ -33,21 +33,20 @@ jobs:
           sudo chmod +x /home/rdpuser/.xsession
           sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
 
-          sudo bash -c 'cat > /etc/xrdp/startwm.sh <<EOF
-#!/bin/sh
-if [ -r /etc/default/locale ]; then
-  . /etc/default/locale
-  export LANG LANGUAGE
-fi
-
-if [ -r /etc/profile ]; then . /etc/profile; fi
-
-if [ -r "\$HOME/.xsession" ]; then
-  . "\$HOME/.xsession"
-elif [ -r /etc/X11/Xsession ]; then
-  . /etc/X11/Xsession
-fi
-EOF'
+          # ایجاد فایل startwm.sh بدون heredoc
+          sudo bash -c 'printf "%s\n" "#!/bin/sh" \
+          "if [ -r /etc/default/locale ]; then" \
+          "  . /etc/default/locale" \
+          "  export LANG LANGUAGE" \
+          "fi" \
+          "" \
+          "if [ -r /etc/profile ]; then . /etc/profile; fi" \
+          "" \
+          "if [ -r \"$HOME/.xsession\" ]; then" \
+          "  . \"$HOME/.xsession\"" \
+          "elif [ -r /etc/X11/Xsession ]; then" \
+          "  . /etc/X11/Xsession" \
+          "fi" > /etc/xrdp/startwm.sh'
 
           sudo chmod +x /etc/xrdp/startwm.sh
           sudo sed -i 's/^allowed_users=console/allowed_users=any/' /etc/X11/Xwrapper.config
